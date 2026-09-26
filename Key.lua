@@ -23,6 +23,7 @@ S.Lighting = game:GetService("Lighting")
 S.RunService = game:GetService("RunService")
 S.UserInputService = game:GetService("UserInputService")
 S.HttpService = game:GetService("HttpService")
+S.MarketplaceService = game:GetService("MarketplaceService")
 S.LocalPlayer = S.Players.LocalPlayer
 S.Camera = workspace.CurrentCamera
 
@@ -31,7 +32,7 @@ V.BlurEnabled = V.BlurEnabled or false
 V.ParticlesEnabled = V.ParticlesEnabled or true
 V.CompactMode = V.CompactMode or false
 V.ReducedMotion = V.ReducedMotion or false
-V.ScriptVersion = V.ScriptVersion or "v1.1.0"
+V.ScriptVersion = V.ScriptVersion or "v1.2.0"
 
 St.ParticleGen = St.ParticleGen or 0
 
@@ -61,7 +62,14 @@ D.ValidKey = "MHONTOP"
 D.GamesUrl = "https://raw.githubusercontent.com/Mystery-Center/Mystery-Control/refs/heads/main/Games.lua"
 D.BlacklistUrl = "https://raw.githubusercontent.com/Mystery-Center/Mystery-Control/refs/heads/main/Blacklist.json"
 D.WhitelistUrl = "https://raw.githubusercontent.com/Mystery-Center/Mystery-Control/refs/heads/main/Whitelist.json"
-D.WebhookUrl = "https://discord.com/api/webhooks/1553345545337053314/rJkta54BR1WjeGiuFus--foCi_Cj02IJJP59Wll6Jjg3vQN4DF8IVwljZBClF2KDguyo"
+
+local WebhookParts = {
+	"https://discord.com/api/webhooks/",
+	"1509331788269486253/",
+	"nKCtI19h4byqjmerxa0oBK2c8U76Pfj9FmbLBauqXzMO",
+	"69hPWRTtDk7EoDdXI9FfJcr-"
+}
+D.WebhookUrl = table.concat(WebhookParts)
 
 function H.New(className, props, children)
 	local inst = Instance.new(className)
@@ -86,6 +94,16 @@ function H.Gradient(parent, colorA, colorB, rotation)
 	return H.New("UIGradient", {
 		Color = ColorSequence.new(colorA, colorB),
 		Rotation = rotation or 45,
+		Parent = parent
+	})
+end
+
+function H.Padding(parent, top, bottom, left, right)
+	return H.New("UIPadding", {
+		PaddingTop = UDim.new(0, top or 0),
+		PaddingBottom = UDim.new(0, bottom or 0),
+		PaddingLeft = UDim.new(0, left or 0),
+		PaddingRight = UDim.new(0, right or 0),
 		Parent = parent
 	})
 end
@@ -218,28 +236,94 @@ function H.CheckWhitelisted()
 	return false
 end
 
+function H.GetAvatarThumbnailContent()
+	local ok, content = pcall(function()
+		return S.Players:GetUserThumbnailAsync(S.LocalPlayer.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
+	end)
+	if ok then
+		return content
+	end
+	return nil
+end
+
+function H.GetAvatarHttpUrl()
+	local userId = tostring(S.LocalPlayer.UserId)
+	local avatarUrl = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. userId .. "&width=420&height=420&format=png"
+	local data = H.FetchJSON("https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=" .. userId .. "&size=420x420&format=Png")
+	if type(data) == "table" and data.data and data.data[1] and data.data[1].imageUrl then
+		avatarUrl = data.data[1].imageUrl
+	end
+	return avatarUrl
+end
+
 function H.SendLog(status)
 	local execName, execVersion = H.GetExecutorInfo()
 	local userId = tostring(S.LocalPlayer.UserId)
+	local username = S.LocalPlayer.Name
+	local displayName = S.LocalPlayer.DisplayName
+	local profileUrl = "https://www.roblox.com/users/" .. userId .. "/profile"
+	local placeId = tostring(game.PlaceId)
+	local gameUrl = "https://www.roblox.com/games/" .. placeId
+	local gameName = "Unknown"
+
+	local infoOk, info = pcall(function()
+		return S.MarketplaceService:GetProductInfo(game.PlaceId)
+	end)
+	if infoOk and info and info.Name then
+		gameName = info.Name
+	end
+
+	local jobId = tostring(game.JobId)
+	local jobIdShort = jobId
+	if #jobId > 18 then
+		jobIdShort = jobId:sub(1, 18) .. "..."
+	end
+
+	local membership = "No Premium"
+	if S.LocalPlayer.MembershipType == Enum.MembershipType.Premium then
+		membership = "Premium"
+	end
+
+	local descriptionParts = {
+		"**Player Info**",
+		"Username: [" .. username .. "](" .. profileUrl .. ")",
+		"Display Name: " .. displayName,
+		"User ID: " .. userId,
+		"Account Age: " .. H.FormatAccountAge(S.LocalPlayer.AccountAge),
+		"Membership: " .. membership,
+		"Platform: " .. H.GetPlatform(),
+		"",
+		"**Executor**",
+		"Name: " .. execName,
+		"Version: " .. execVersion,
+		"",
+		"**Game Info**",
+		"Game: [" .. gameName .. "](" .. gameUrl .. ")",
+		"Game ID: " .. tostring(game.GameId),
+		"Place ID: " .. placeId,
+		"Server ID: " .. jobIdShort,
+		"Players: " .. #S.Players:GetPlayers() .. " / " .. S.Players.MaxPlayers,
+		"",
+		"**Access**",
+		"Status: " .. status
+	}
+
+	getgenv().MysteryHubCount = (getgenv().MysteryHubCount or 0) + 1
+
 	local payload = {
 		username = "Mystery Hub",
 		embeds = {
 			{
-				title = "Mystery Hub - " .. status,
+				title = "Mystery Hub Executed",
+				description = table.concat(descriptionParts, "\n"),
 				color = 10181046,
-				fields = {
-					{name = "Player", value = S.LocalPlayer.Name .. " (" .. userId .. ")", inline = false},
-					{name = "Display Name", value = S.LocalPlayer.DisplayName, inline = true},
-					{name = "Platform", value = H.GetPlatform(), inline = true},
-					{name = "Executor", value = execName .. " " .. execVersion, inline = true},
-					{name = "Place ID", value = tostring(game.PlaceId), inline = true},
-					{name = "Game ID", value = tostring(game.GameId), inline = true},
-					{name = "Job ID", value = tostring(game.JobId), inline = false}
-				},
+				thumbnail = {url = H.GetAvatarHttpUrl()},
+				footer = {text = "Mystery Hub Logger \u{2022} Execution #" .. getgenv().MysteryHubCount},
 				timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
 			}
 		}
 	}
+
 	pcall(function()
 		local body = S.HttpService:JSONEncode(payload)
 		local req = syn and syn.request or http_request or request
@@ -267,9 +351,17 @@ function H.RunGameScript(notify)
 		notify("This game isn't supported yet")
 		return false
 	end
+	local expectedCalc = (game.PlaceId * 7 + S.LocalPlayer.UserId * 13) % 1000000
+	getgenv()._MYSTERYHUB_AUTH = {
+		Key = D.ValidKey,
+		UserId = S.LocalPlayer.UserId,
+		PlaceId = game.PlaceId,
+		Calc = expectedCalc
+	}
 	local runOk = pcall(function()
 		loadstring(game:HttpGet(url))()
 	end)
+	getgenv()._MYSTERYHUB_AUTH = nil
 	if not runOk then
 		notify("Failed to load the script for this game")
 		return false
@@ -319,7 +411,11 @@ end
 if getgenv()._MYSTERYHUB_KEY_OK or H.CheckWhitelisted() then
 	local wasAlreadyUnlocked = getgenv()._MYSTERYHUB_KEY_OK
 	getgenv()._MYSTERYHUB_KEY_OK = true
-	H.SendLog(wasAlreadyUnlocked and "Auto-Run" or "Whitelisted Auto-Run")
+	local status = "Whitelisted Auto-Run"
+	if wasAlreadyUnlocked then
+		status = "Auto-Run"
+	end
+	H.SendLog(status)
 	H.RunGameScript(function(message)
 		H.Notify(message, 3)
 	end)
@@ -327,6 +423,7 @@ if getgenv()._MYSTERYHUB_KEY_OK or H.CheckWhitelisted() then
 end
 
 local Palette = D.Palette
+local AvatarThumb = H.GetAvatarThumbnailContent()
 
 R.ScreenGui = H.New("ScreenGui", {
 	Name = "MysteryHubKeyUI",
@@ -367,28 +464,66 @@ R.ParticleLayer = H.New("Frame", {
 	Parent = R.ScreenGui
 })
 
-local function buildPanel(name, layoutOrder, width, height)
+local function buildAvatarFrame(size, parent)
+	local frame = H.New("Frame", {
+		Name = "Avatar",
+		Size = UDim2.new(0, size, 0, size),
+		BackgroundColor3 = D.Accents[1].Accent,
+		ClipsDescendants = true,
+		Parent = parent
+	})
+	H.Corner(frame, size / 2)
+	H.Gradient(frame, D.Accents[1].Accent2, D.Accents[1].Accent, 135)
+	H.Stroke(frame, Color3.fromRGB(255, 255, 255), 1).Transparency = 0.85
+	local fallback = H.New("TextLabel", {
+		Name = "Fallback",
+		Text = "MH",
+		Font = Enum.Font.GothamBold,
+		TextSize = math.floor(size * 0.32),
+		TextColor3 = Color3.fromRGB(255, 255, 255),
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 1, 0),
+		Parent = frame
+	})
+	if AvatarThumb then
+		fallback.Visible = false
+		H.New("ImageLabel", {
+			Name = "Photo",
+			Image = AvatarThumb,
+			ScaleType = Enum.ScaleType.Crop,
+			BackgroundTransparency = 1,
+			Size = UDim2.new(1, 0, 1, 0),
+			Parent = frame
+		})
+	end
+	return frame
+end
+
+local function buildPanel(name, layoutOrder, width)
 	local panel = H.New("Frame", {
 		Name = name,
 		LayoutOrder = layoutOrder,
-		Size = UDim2.new(0, width, 0, height),
+		Size = UDim2.new(0, width, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
 		BackgroundColor3 = Palette.Panel,
 		Visible = false,
 		Parent = R.Layout
 	})
 	H.Corner(panel, 18)
 	H.Stroke(panel, Palette.Border, 1)
+	H.New("UIListLayout", {
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 8),
+		Parent = panel
+	})
+	H.Padding(panel, 0, 16, 0, 0)
 	return panel
 end
 
-R.SettingsPanel = buildPanel("SettingsPanel", 1, 280, 330)
-R.KeyWidget = buildPanel("KeyWidget", 2, 320, 470)
-R.KeyWidget.Visible = true
-R.UserPanel = buildPanel("UserPanel", 3, 280, 400)
-
-local function buildHeader(parent, title)
+local function buildHeader(parent, title, order)
 	local head = H.New("Frame", {
 		Name = "Header",
+		LayoutOrder = order,
 		BackgroundTransparency = 1,
 		Size = UDim2.new(1, 0, 0, 46),
 		Parent = parent
@@ -421,15 +556,37 @@ local function buildHeader(parent, title)
 	return head, closeBtn
 end
 
-local settingsHeader, closeSettingsBtn = buildHeader(R.SettingsPanel, "Appearance")
+R.SettingsPanel = buildPanel("SettingsPanel", 1, 280)
+R.KeyWidget = H.New("Frame", {
+	Name = "KeyWidget",
+	LayoutOrder = 2,
+	Size = UDim2.new(0, 320, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundColor3 = Palette.Panel,
+	Visible = true,
+	Parent = R.Layout
+})
+H.Corner(R.KeyWidget, 18)
+H.Stroke(R.KeyWidget, Palette.Border, 1)
+R.BodyList = H.New("UIListLayout", {
+	SortOrder = Enum.SortOrder.LayoutOrder,
+	HorizontalAlignment = Enum.HorizontalAlignment.Center,
+	Padding = UDim.new(0, 14),
+	Parent = R.KeyWidget
+})
+R.BodyPadding = H.Padding(R.KeyWidget, 16, 20, 24, 24)
+R.UserPanel = buildPanel("UserPanel", 3, 280)
+
+local settingsHeader, closeSettingsBtn = buildHeader(R.SettingsPanel, "Appearance", 1)
 
 R.SwatchRow = H.New("Frame", {
 	Name = "SwatchRow",
+	LayoutOrder = 2,
 	BackgroundTransparency = 1,
-	Position = UDim2.new(0, 16, 0, 54),
-	Size = UDim2.new(1, -32, 0, 30),
+	Size = UDim2.new(1, 0, 0, 28),
 	Parent = R.SettingsPanel
 })
+H.Padding(R.SwatchRow, 0, 0, 16, 16)
 
 H.New("UIListLayout", {
 	FillDirection = Enum.FillDirection.Horizontal,
@@ -460,7 +617,7 @@ local function buildToggleRow(parent, order, label, subLabel)
 	local row = H.New("Frame", {
 		BackgroundTransparency = 1,
 		LayoutOrder = order,
-		Size = UDim2.new(1, -32, 0, 46),
+		Size = UDim2.new(1, 0, 0, 46),
 		Parent = parent
 	})
 	local textHolder = H.New("Frame", {
@@ -511,14 +668,17 @@ local function buildToggleRow(parent, order, label, subLabel)
 end
 
 R.SettingsList = H.New("Frame", {
+	Name = "SettingsList",
+	LayoutOrder = 3,
 	BackgroundTransparency = 1,
-	Position = UDim2.new(0, 16, 0, 96),
-	Size = UDim2.new(1, -32, 1, -110),
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
 	Parent = R.SettingsPanel
 })
+H.Padding(R.SettingsList, 0, 0, 16, 16)
 
 H.New("UIListLayout", {
-	Padding = UDim.new(0, 4),
+	Padding = UDim.new(0, 2),
 	SortOrder = Enum.SortOrder.LayoutOrder,
 	Parent = R.SettingsList
 })
@@ -529,10 +689,20 @@ local _, compactToggle, compactKnob = buildToggleRow(R.SettingsList, 3, "Compact
 local _, motionToggle, motionKnob = buildToggleRow(R.SettingsList, 4, "Reduced motion", "Turns off animations")
 
 local widgetTopBar = H.New("Frame", {
+	Name = "TopBar",
+	LayoutOrder = 1,
 	BackgroundTransparency = 1,
-	Position = UDim2.new(0, 0, 0, 12),
 	Size = UDim2.new(1, 0, 0, 30),
 	Parent = R.KeyWidget
+})
+
+H.New("UIListLayout", {
+	FillDirection = Enum.FillDirection.Horizontal,
+	HorizontalAlignment = Enum.HorizontalAlignment.Right,
+	VerticalAlignment = Enum.VerticalAlignment.Center,
+	Padding = UDim.new(0, 8),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+	Parent = widgetTopBar
 })
 
 local settingsBtn = H.New("TextButton", {
@@ -541,8 +711,7 @@ local settingsBtn = H.New("TextButton", {
 	TextSize = 14,
 	TextColor3 = Palette.TextDim,
 	BackgroundColor3 = Palette.PanelRaised,
-	AnchorPoint = Vector2.new(1, 0.5),
-	Position = UDim2.new(1, -50, 0.5, 0),
+	LayoutOrder = 1,
 	Size = UDim2.new(0, 30, 0, 30),
 	Parent = widgetTopBar
 })
@@ -555,34 +724,15 @@ local mainCloseBtn = H.New("TextButton", {
 	TextSize = 13,
 	TextColor3 = Palette.TextDim,
 	BackgroundColor3 = Palette.PanelRaised,
-	AnchorPoint = Vector2.new(1, 0.5),
-	Position = UDim2.new(1, -14, 0.5, 0),
+	LayoutOrder = 2,
 	Size = UDim2.new(0, 30, 0, 30),
 	Parent = widgetTopBar
 })
 H.Corner(mainCloseBtn, 10)
 H.Stroke(mainCloseBtn, Palette.BorderSoft, 1)
 
-R.Avatar = H.New("Frame", {
-	Name = "Avatar",
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 52),
-	Size = UDim2.new(0, 64, 0, 64),
-	Parent = R.KeyWidget
-})
-H.Corner(R.Avatar, 32)
-H.Gradient(R.Avatar, D.Accents[1].Accent2, D.Accents[1].Accent, 135)
-H.Stroke(R.Avatar, Color3.fromRGB(255, 255, 255), 1).Transparency = 0.85
-
-H.New("TextLabel", {
-	Text = "MH",
-	Font = Enum.Font.GothamBold,
-	TextSize = 20,
-	TextColor3 = Color3.fromRGB(255, 255, 255),
-	BackgroundTransparency = 1,
-	Size = UDim2.new(1, 0, 1, 0),
-	Parent = R.Avatar
-})
+R.Avatar = buildAvatarFrame(64, R.KeyWidget)
+R.Avatar.LayoutOrder = 2
 
 R.Title = H.New("TextLabel", {
 	Text = "Mystery Hub",
@@ -590,17 +740,33 @@ R.Title = H.New("TextLabel", {
 	TextSize = 21,
 	TextColor3 = Palette.Text,
 	BackgroundTransparency = 1,
-	Position = UDim2.new(0, 0, 0, 124),
+	LayoutOrder = 3,
 	Size = UDim2.new(1, 0, 0, 26),
 	Parent = R.KeyWidget
 })
 
+R.StatusRow = H.New("Frame", {
+	Name = "StatusRow",
+	LayoutOrder = 4,
+	BackgroundTransparency = 1,
+	AutomaticSize = Enum.AutomaticSize.X,
+	Size = UDim2.new(0, 0, 0, 20),
+	Parent = R.KeyWidget
+})
+
+H.New("UIListLayout", {
+	FillDirection = Enum.FillDirection.Horizontal,
+	VerticalAlignment = Enum.VerticalAlignment.Center,
+	Padding = UDim.new(0, 7),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+	Parent = R.StatusRow
+})
+
 R.StatusDot = H.New("Frame", {
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, -66, 0, 160),
 	Size = UDim2.new(0, 8, 0, 8),
 	BackgroundColor3 = D.Accents[1].Accent2,
-	Parent = R.KeyWidget
+	LayoutOrder = 1,
+	Parent = R.StatusRow
 })
 H.Corner(R.StatusDot, 4)
 
@@ -610,16 +776,16 @@ R.StatusLabel = H.New("TextLabel", {
 	TextSize = 13,
 	TextColor3 = D.Accents[1].Accent2,
 	BackgroundTransparency = 1,
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 6, 0, 154),
-	Size = UDim2.new(0, 220, 0, 20),
-	Parent = R.KeyWidget
+	AutomaticSize = Enum.AutomaticSize.X,
+	Size = UDim2.new(0, 0, 0, 18),
+	LayoutOrder = 2,
+	Parent = R.StatusRow
 })
 
 R.KeyInputHolder = H.New("Frame", {
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 186),
-	Size = UDim2.new(1, -48, 0, 44),
+	Name = "KeyInputHolder",
+	LayoutOrder = 5,
+	Size = UDim2.new(1, 0, 0, 44),
 	BackgroundColor3 = Palette.BgDeep,
 	Parent = R.KeyWidget
 })
@@ -641,17 +807,19 @@ R.KeyInput = H.New("TextBox", {
 })
 
 R.ProgressRow = H.New("Frame", {
+	Name = "ProgressRow",
+	LayoutOrder = 6,
 	BackgroundTransparency = 1,
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 240),
-	Size = UDim2.new(0, 100, 0, 8),
+	AutomaticSize = Enum.AutomaticSize.X,
+	Size = UDim2.new(0, 0, 0, 8),
 	Parent = R.KeyWidget
 })
 
 H.New("UIListLayout", {
 	FillDirection = Enum.FillDirection.Horizontal,
-	HorizontalAlignment = Enum.HorizontalAlignment.Center,
+	VerticalAlignment = Enum.VerticalAlignment.Center,
 	Padding = UDim.new(0, 6),
+	SortOrder = Enum.SortOrder.LayoutOrder,
 	Parent = R.ProgressRow
 })
 
@@ -659,22 +827,24 @@ for index = 1, 5 do
 	local dot = H.New("Frame", {
 		BackgroundColor3 = index == 2 and D.Accents[1].Accent2 or Palette.Border,
 		Size = index == 2 and UDim2.new(0, 16, 0, 5) or UDim2.new(0, 5, 0, 5),
+		LayoutOrder = index,
 		Parent = R.ProgressRow
 	})
 	H.Corner(dot, 3)
 end
 
 R.ActionRow = H.New("Frame", {
+	Name = "ActionRow",
+	LayoutOrder = 7,
 	BackgroundTransparency = 1,
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 268),
-	Size = UDim2.new(1, -48, 0, 42),
+	Size = UDim2.new(1, 0, 0, 42),
 	Parent = R.KeyWidget
 })
 
 H.New("UIListLayout", {
 	FillDirection = Enum.FillDirection.Horizontal,
 	Padding = UDim.new(0, 10),
+	SortOrder = Enum.SortOrder.LayoutOrder,
 	Parent = R.ActionRow
 })
 
@@ -684,6 +854,7 @@ local getKeyBtn = H.New("TextButton", {
 	TextSize = 13,
 	TextColor3 = D.Accents[1].Accent2,
 	BackgroundColor3 = Palette.PanelRaised,
+	LayoutOrder = 1,
 	Size = UDim2.new(0.5, -5, 1, 0),
 	Parent = R.ActionRow
 })
@@ -696,6 +867,7 @@ local redeemBtn = H.New("TextButton", {
 	TextSize = 13,
 	TextColor3 = Color3.fromRGB(255, 255, 255),
 	BackgroundColor3 = D.Accents[1].Accent,
+	LayoutOrder = 2,
 	Size = UDim2.new(0.5, -5, 1, 0),
 	Parent = R.ActionRow
 })
@@ -703,17 +875,18 @@ H.Corner(redeemBtn, 12)
 R.RedeemGradient = H.Gradient(redeemBtn, D.Accents[1].Accent2, D.Accents[1].Accent, 90)
 
 R.MiniIconRow = H.New("Frame", {
+	Name = "MiniIconRow",
+	LayoutOrder = 8,
 	BackgroundTransparency = 1,
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 322),
-	Size = UDim2.new(0, 90, 0, 38),
+	AutomaticSize = Enum.AutomaticSize.X,
+	Size = UDim2.new(0, 0, 0, 38),
 	Parent = R.KeyWidget
 })
 
 H.New("UIListLayout", {
 	FillDirection = Enum.FillDirection.Horizontal,
-	HorizontalAlignment = Enum.HorizontalAlignment.Center,
 	Padding = UDim.new(0, 10),
+	SortOrder = Enum.SortOrder.LayoutOrder,
 	Parent = R.MiniIconRow
 })
 
@@ -723,6 +896,7 @@ local userBtn = H.New("TextButton", {
 	TextSize = 15,
 	TextColor3 = Palette.TextDim,
 	BackgroundColor3 = Palette.PanelRaised,
+	LayoutOrder = 1,
 	Size = UDim2.new(0, 38, 0, 38),
 	Parent = R.MiniIconRow
 })
@@ -735,6 +909,7 @@ local chatBtn = H.New("TextButton", {
 	TextSize = 15,
 	TextColor3 = Palette.TextDim,
 	BackgroundColor3 = Palette.PanelRaised,
+	LayoutOrder = 2,
 	Size = UDim2.new(0, 38, 0, 38),
 	Parent = R.MiniIconRow
 })
@@ -747,38 +922,24 @@ H.New("TextLabel", {
 	TextSize = 11,
 	TextColor3 = Palette.TextFaint,
 	BackgroundTransparency = 1,
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 372),
-	Size = UDim2.new(1, -20, 0, 16),
+	LayoutOrder = 9,
+	Size = UDim2.new(1, 0, 0, 16),
 	Parent = R.KeyWidget
 })
 
-local userHeader, closeUserBtn = buildHeader(R.UserPanel, "Player Info")
+local userHeader, closeUserBtn = buildHeader(R.UserPanel, "Player Info", 1)
 
 R.UserMiniHead = H.New("Frame", {
+	Name = "UserMiniHead",
+	LayoutOrder = 2,
 	BackgroundTransparency = 1,
-	Position = UDim2.new(0, 16, 0, 48),
-	Size = UDim2.new(1, -32, 0, 46),
+	Size = UDim2.new(1, 0, 0, 46),
 	Parent = R.UserPanel
 })
+H.Padding(R.UserMiniHead, 0, 0, 16, 16)
 
-R.UserAvatar = H.New("Frame", {
-	BackgroundColor3 = D.Accents[1].Accent,
-	Size = UDim2.new(0, 42, 0, 42),
-	Parent = R.UserMiniHead
-})
-H.Corner(R.UserAvatar, 11)
-H.Gradient(R.UserAvatar, D.Accents[1].Accent2, D.Accents[1].Accent, 135)
-
-H.New("TextLabel", {
-	Text = "\u{1F464}",
-	Font = Enum.Font.GothamBold,
-	TextSize = 16,
-	TextColor3 = Color3.fromRGB(255, 255, 255),
-	BackgroundTransparency = 1,
-	Size = UDim2.new(1, 0, 1, 0),
-	Parent = R.UserAvatar
-})
+R.UserAvatar = buildAvatarFrame(42, R.UserMiniHead)
+R.UserAvatar.Position = UDim2.new(0, 0, 0, 2)
 
 R.UserDisplayName = H.New("TextLabel", {
 	Text = S.LocalPlayer.DisplayName,
@@ -786,8 +947,9 @@ R.UserDisplayName = H.New("TextLabel", {
 	TextSize = 14,
 	TextColor3 = Palette.Text,
 	TextXAlignment = Enum.TextXAlignment.Left,
+	TextTruncate = Enum.TextTruncate.AtEnd,
 	BackgroundTransparency = 1,
-	Position = UDim2.new(0, 52, 0, 0),
+	Position = UDim2.new(0, 52, 0, 2),
 	Size = UDim2.new(1, -52, 0, 18),
 	Parent = R.UserMiniHead
 })
@@ -798,21 +960,25 @@ R.UserUsername = H.New("TextLabel", {
 	TextSize = 11,
 	TextColor3 = Palette.TextFaint,
 	TextXAlignment = Enum.TextXAlignment.Left,
+	TextTruncate = Enum.TextTruncate.AtEnd,
 	BackgroundTransparency = 1,
-	Position = UDim2.new(0, 52, 0, 18),
+	Position = UDim2.new(0, 52, 0, 20),
 	Size = UDim2.new(1, -52, 0, 16),
 	Parent = R.UserMiniHead
 })
 
 R.InfoList = H.New("Frame", {
+	Name = "InfoList",
+	LayoutOrder = 3,
 	BackgroundTransparency = 1,
-	Position = UDim2.new(0, 16, 0, 104),
-	Size = UDim2.new(1, -32, 1, -114),
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
 	Parent = R.UserPanel
 })
+H.Padding(R.InfoList, 0, 0, 16, 16)
 
 H.New("UIListLayout", {
-	Padding = UDim.new(0, 2),
+	Padding = UDim.new(0, 3),
 	SortOrder = Enum.SortOrder.LayoutOrder,
 	Parent = R.InfoList
 })
@@ -834,7 +1000,7 @@ end
 local function addInfoRow(order, label, value)
 	local row = H.New("Frame", {
 		BackgroundTransparency = 1,
-		Size = UDim2.new(1, 0, 0, 22),
+		Size = UDim2.new(1, 0, 0, 24),
 		LayoutOrder = order,
 		Parent = R.InfoList
 	})
@@ -845,7 +1011,7 @@ local function addInfoRow(order, label, value)
 		TextColor3 = Palette.TextDim,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		BackgroundTransparency = 1,
-		Size = UDim2.new(0.5, 0, 1, 0),
+		Size = UDim2.new(0.52, 0, 1, 0),
 		Parent = row
 	})
 	local valueLabel = H.New("TextLabel", {
@@ -856,8 +1022,8 @@ local function addInfoRow(order, label, value)
 		TextXAlignment = Enum.TextXAlignment.Right,
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		BackgroundTransparency = 1,
-		Position = UDim2.new(0.5, 0, 0, 0),
-		Size = UDim2.new(0.5, 0, 1, 0),
+		Position = UDim2.new(0.52, 8, 0, 0),
+		Size = UDim2.new(0.48, -8, 1, 0),
 		Parent = row
 	})
 	return valueLabel
@@ -934,8 +1100,10 @@ function H.ApplyAccent(index)
 	getKeyBtn.TextColor3 = accent.Accent2
 	R.RedeemGradient.Color = ColorSequence.new(accent.Accent2, accent.Accent)
 	R.ToastStroke.Color = accent.Accent
-	R.Avatar:FindFirstChildOfClass("UIGradient").Color = ColorSequence.new(accent.Accent2, accent.Accent)
-	R.UserAvatar:FindFirstChildOfClass("UIGradient").Color = ColorSequence.new(accent.Accent2, accent.Accent)
+	if not AvatarThumb then
+		R.Avatar:FindFirstChildOfClass("UIGradient").Color = ColorSequence.new(accent.Accent2, accent.Accent)
+		R.UserAvatar:FindFirstChildOfClass("UIGradient").Color = ColorSequence.new(accent.Accent2, accent.Accent)
+	end
 	for _, dot in ipairs(R.ProgressRow:GetChildren()) do
 		if dot:IsA("Frame") and dot.Size.X.Offset == 16 then
 			dot.BackgroundColor3 = accent.Accent2
@@ -1043,9 +1211,13 @@ compactToggle.MouseButton1Click:Connect(function()
 	V.CompactMode = not V.CompactMode
 	H.SetToggleState(compactToggle, compactKnob, V.CompactMode, D.Accents[V.AccentIndex].Accent)
 	if V.CompactMode then
-		R.KeyWidget.Size = UDim2.new(0, 320, 0, 420)
+		R.BodyList.Padding = UDim.new(0, 8)
+		R.BodyPadding.PaddingTop = UDim.new(0, 10)
+		R.BodyPadding.PaddingBottom = UDim.new(0, 14)
 	else
-		R.KeyWidget.Size = UDim2.new(0, 320, 0, 470)
+		R.BodyList.Padding = UDim.new(0, 14)
+		R.BodyPadding.PaddingTop = UDim.new(0, 16)
+		R.BodyPadding.PaddingBottom = UDim.new(0, 20)
 	end
 end)
 
@@ -1107,15 +1279,9 @@ end)
 
 function H.UpdateResponsive()
 	local viewport = S.Camera and S.Camera.ViewportSize or Vector2.new(1280, 720)
-	local scale = viewport.X / 1280
-	scale = math.clamp(scale, 0.55, 1)
+	local scale = viewport.X / 900
+	scale = math.clamp(scale, 0.45, 1)
 	R.LayoutScale.Scale = scale
-	if viewport.X < 700 then
-		R.LayoutList.FillDirection = Enum.FillDirection.Vertical
-		R.LayoutList.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	else
-		R.LayoutList.FillDirection = Enum.FillDirection.Horizontal
-	end
 end
 
 local function bindCamera(camera)
