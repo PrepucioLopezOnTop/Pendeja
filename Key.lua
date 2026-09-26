@@ -21,13 +21,17 @@ S.Players = game:GetService("Players")
 S.TweenService = game:GetService("TweenService")
 S.Lighting = game:GetService("Lighting")
 S.RunService = game:GetService("RunService")
+S.UserInputService = game:GetService("UserInputService")
+S.HttpService = game:GetService("HttpService")
 S.LocalPlayer = S.Players.LocalPlayer
+S.Camera = workspace.CurrentCamera
 
 V.AccentIndex = V.AccentIndex or 1
 V.BlurEnabled = V.BlurEnabled or false
 V.ParticlesEnabled = V.ParticlesEnabled or true
 V.CompactMode = V.CompactMode or false
 V.ReducedMotion = V.ReducedMotion or false
+V.ScriptVersion = V.ScriptVersion or "v1.1.0"
 
 St.ParticleGen = St.ParticleGen or 0
 
@@ -52,7 +56,12 @@ D.Palette = D.Palette or {
 	Ok = Color3.fromRGB(57, 201, 138)
 }
 
-D.DiscordInvite = "https://discord.gg/MHONTOP"
+D.DiscordInvite = "https://discord.gg/yBfnjRHKnd"
+D.ValidKey = "MHONTOP"
+D.GamesUrl = "https://raw.githubusercontent.com/Mystery-Center/Mystery-Control/refs/heads/main/Games.lua"
+D.BlacklistUrl = "https://raw.githubusercontent.com/Mystery-Center/Mystery-Control/refs/heads/main/Blacklist.json"
+D.WhitelistUrl = "https://raw.githubusercontent.com/Mystery-Center/Mystery-Control/refs/heads/main/Whitelist.json"
+D.WebhookUrl = "https://discord.com/api/webhooks/1509331788269486253/nKCtI19h4byqjmerxa0oBK2c8U76Pfj9FmbLBauqXzMO69hPWRTtDk7EoDdXI9FfJcr-"
 
 function H.New(className, props, children)
 	local inst = Instance.new(className)
@@ -101,14 +110,33 @@ function H.SetClipboard(text)
 	return fallbackOk
 end
 
-function H.GetExecutorName()
-	local ok, name = pcall(function()
+function H.GetExecutorInfo()
+	local ok, name, version = pcall(function()
 		return identifyexecutor()
 	end)
 	if ok and name then
-		return name
+		return name, version or "?"
 	end
-	return "Unknown"
+	if syn then
+		return "Synapse X", "?"
+	end
+	if KRNL_LOADED then
+		return "KRNL", "?"
+	end
+	if rconsoleprint then
+		return "Script-Ware", "?"
+	end
+	return "Unknown", "?"
+end
+
+function H.GetPlatform()
+	if S.UserInputService.TouchEnabled and not S.UserInputService.KeyboardEnabled then
+		return "Mobile"
+	end
+	if S.UserInputService.GamepadEnabled then
+		return "Console"
+	end
+	return "PC"
 end
 
 function H.FormatAccountAge(days)
@@ -136,6 +164,168 @@ function H.GetGui()
 	return S.LocalPlayer:WaitForChild("PlayerGui")
 end
 
+function H.FetchJSON(url)
+	local ok, raw = pcall(function()
+		return game:HttpGet(url)
+	end)
+	if not ok or raw == "" then
+		return nil
+	end
+	local decodeOk, data = pcall(function()
+		return S.HttpService:JSONDecode(raw)
+	end)
+	if not decodeOk then
+		return nil
+	end
+	return data
+end
+
+function H.LoadGamesTable()
+	local ok, result = pcall(function()
+		return loadstring(game:HttpGet(D.GamesUrl))()
+	end)
+	if ok and type(result) == "table" then
+		return result
+	end
+	return nil
+end
+
+function H.CheckBlacklisted()
+	local list = H.FetchJSON(D.BlacklistUrl)
+	if type(list) ~= "table" then
+		return false
+	end
+	local myId = S.LocalPlayer.UserId
+	for _, entry in ipairs(list) do
+		if tonumber(entry) == myId then
+			return true
+		end
+	end
+	return false
+end
+
+function H.CheckWhitelisted()
+	local list = H.FetchJSON(D.WhitelistUrl)
+	if type(list) ~= "table" then
+		return false
+	end
+	local myName = string.lower(S.LocalPlayer.Name)
+	for _, entry in ipairs(list) do
+		if type(entry) == "string" and entry ~= "" and string.lower(entry) == myName then
+			return true
+		end
+	end
+	return false
+end
+
+function H.SendLog(status)
+	local execName, execVersion = H.GetExecutorInfo()
+	local userId = tostring(S.LocalPlayer.UserId)
+	local payload = {
+		username = "Mystery Hub",
+		embeds = {
+			{
+				title = "Mystery Hub - " .. status,
+				color = 10181046,
+				fields = {
+					{name = "Player", value = S.LocalPlayer.Name .. " (" .. userId .. ")", inline = false},
+					{name = "Display Name", value = S.LocalPlayer.DisplayName, inline = true},
+					{name = "Platform", value = H.GetPlatform(), inline = true},
+					{name = "Executor", value = execName .. " " .. execVersion, inline = true},
+					{name = "Place ID", value = tostring(game.PlaceId), inline = true},
+					{name = "Game ID", value = tostring(game.GameId), inline = true},
+					{name = "Job ID", value = tostring(game.JobId), inline = false}
+				},
+				timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+			}
+		}
+	}
+	pcall(function()
+		local body = S.HttpService:JSONEncode(payload)
+		local req = syn and syn.request or http_request or request
+		if req then
+			req({
+				Url = D.WebhookUrl,
+				Method = "POST",
+				Headers = {["Content-Type"] = "application/json"},
+				Body = body
+			})
+		else
+			S.HttpService:PostAsync(D.WebhookUrl, body, Enum.HttpContentType.ApplicationJson)
+		end
+	end)
+end
+
+function H.RunGameScript(notify)
+	local games = H.LoadGamesTable()
+	if not games then
+		notify("Could not reach the Mystery Hub registry")
+		return false
+	end
+	local url = games[game.GameId] or games[game.PlaceId]
+	if not url then
+		notify("This game isn't supported yet")
+		return false
+	end
+	local runOk = pcall(function()
+		loadstring(game:HttpGet(url))()
+	end)
+	if not runOk then
+		notify("Failed to load the script for this game")
+		return false
+	end
+	return true
+end
+
+function H.Notify(message, duration)
+	duration = duration or 2.5
+	local gui = H.New("ScreenGui", {
+		Name = "MysteryHubNotify",
+		ResetOnSpawn = false,
+		DisplayOrder = 60,
+		Parent = H.GetGui()
+	})
+	local label = H.New("TextLabel", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		Size = UDim2.new(0, 440, 0, 50),
+		BackgroundTransparency = 1,
+		Text = message,
+		Font = Enum.Font.GothamBold,
+		TextSize = 18,
+		TextColor3 = D.Accents[1].Accent2,
+		TextStrokeTransparency = 0.4,
+		TextTransparency = 1,
+		TextWrapped = true,
+		Parent = gui
+	})
+	H.Tween(label, {TextTransparency = 0}, 0.3)
+	task.delay(duration, function()
+		H.Tween(label, {TextTransparency = 1}, 0.3)
+		task.delay(0.35, function()
+			gui:Destroy()
+		end)
+	end)
+end
+
+if H.CheckBlacklisted() then
+	H.Notify("You have been blacklisted from Mystery Hub.", 4)
+	pcall(function()
+		S.LocalPlayer:Kick("You have been blacklisted from Mystery Hub.")
+	end)
+	return
+end
+
+if getgenv()._MYSTERYHUB_KEY_OK or H.CheckWhitelisted() then
+	local wasAlreadyUnlocked = getgenv()._MYSTERYHUB_KEY_OK
+	getgenv()._MYSTERYHUB_KEY_OK = true
+	H.SendLog(wasAlreadyUnlocked and "Auto-Run" or "Whitelisted Auto-Run")
+	H.RunGameScript(function(message)
+		H.Notify(message, 3)
+	end)
+	return
+end
+
 local Palette = D.Palette
 
 R.ScreenGui = H.New("ScreenGui", {
@@ -156,7 +346,9 @@ R.Layout = H.New("Frame", {
 	Parent = R.ScreenGui
 })
 
-H.New("UIListLayout", {
+R.LayoutScale = H.New("UIScale", {Scale = 1, Parent = R.Layout})
+
+R.LayoutList = H.New("UIListLayout", {
 	FillDirection = Enum.FillDirection.Horizontal,
 	HorizontalAlignment = Enum.HorizontalAlignment.Center,
 	VerticalAlignment = Enum.VerticalAlignment.Top,
@@ -682,8 +874,9 @@ addInfoRow(7, "Players", #S.Players:GetPlayers() .. " / " .. S.Players.MaxPlayer
 
 addSectionTitle(8, "Script")
 addInfoRow(9, "Script", "Mystery Hub")
-addInfoRow(10, "Version", V.ScriptVersion or "v1.0.0")
-addInfoRow(11, "Executor", H.GetExecutorName())
+addInfoRow(10, "Version", V.ScriptVersion)
+local execNameForPanel, execVersionForPanel = H.GetExecutorInfo()
+addInfoRow(11, "Executor", execNameForPanel .. " " .. execVersionForPanel)
 
 R.Toast = H.New("Frame", {
 	Name = "Toast",
@@ -866,22 +1059,80 @@ getKeyBtn.MouseButton1Click:Connect(function()
 	if copied then
 		H.ShowToast("Discord invite copied - join to get your key")
 	else
-		H.ShowToast("Copy failed - invite code: MHONTOP")
+		H.ShowToast("Copy failed - invite link: " .. D.DiscordInvite)
 	end
 end)
 
-redeemBtn.MouseButton1Click:Connect(function()
-	if R.KeyInput.Text == "" then
+local function attemptRedeem()
+	local now = tick()
+	if St.LastInvalidAt and (now - St.LastInvalidAt) < 1 then
+		return
+	end
+	local raw = R.KeyInput.Text
+	local trimmed = raw:gsub("^%s+", ""):gsub("%s+$", "")
+	if trimmed == "" then
 		H.ShowToast("Enter a key first")
 		return
 	end
-	H.ShowToast("Validating key...")
+	if string.upper(trimmed) ~= D.ValidKey then
+		St.LastInvalidAt = now
+		H.ShowToast("Invalid key")
+		return
+	end
+	getgenv()._MYSTERYHUB_KEY_OK = true
+	H.ShowToast("Key accepted - loading...")
+	H.SendLog("Key Redeemed")
+	local success = H.RunGameScript(function(message)
+		H.ShowToast(message)
+	end)
+	if success then
+		H.Tween(R.KeyWidget, {BackgroundTransparency = 1}, 0.25)
+		task.delay(0.3, function()
+			R.ScreenGui:Destroy()
+		end)
+	end
+end
+
+redeemBtn.MouseButton1Click:Connect(attemptRedeem)
+
+R.KeyInput.FocusLost:Connect(function(enterPressed)
+	if enterPressed then
+		attemptRedeem()
+	end
 end)
 
 chatBtn.MouseButton1Click:Connect(function()
 	H.ShowToast("Support chat coming soon")
 end)
 
+function H.UpdateResponsive()
+	local viewport = S.Camera and S.Camera.ViewportSize or Vector2.new(1280, 720)
+	local scale = viewport.X / 1280
+	scale = math.clamp(scale, 0.55, 1)
+	R.LayoutScale.Scale = scale
+	if viewport.X < 700 then
+		R.LayoutList.FillDirection = Enum.FillDirection.Vertical
+		R.LayoutList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	else
+		R.LayoutList.FillDirection = Enum.FillDirection.Horizontal
+	end
+end
+
+local function bindCamera(camera)
+	if not camera then
+		return
+	end
+	camera:GetPropertyChangedSignal("ViewportSize"):Connect(H.UpdateResponsive)
+end
+
+bindCamera(S.Camera)
+
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+	S.Camera = workspace.CurrentCamera
+	bindCamera(S.Camera)
+	H.UpdateResponsive()
+end)
+
 H.SetToggleState(particlesToggle, particlesKnob, true, D.Accents[V.AccentIndex].Accent)
 H.SpawnParticleLoop()
-
+H.UpdateResponsive()
