@@ -62,6 +62,15 @@ D.ValidKey = "MHONTOP"
 D.GamesUrl = "https://raw.githubusercontent.com/Mystery-Center/Mystery-Control/refs/heads/main/Games.lua"
 D.BlacklistUrl = "https://raw.githubusercontent.com/Mystery-Center/Mystery-Control/refs/heads/main/Blacklist.json"
 D.WhitelistUrl = "https://raw.githubusercontent.com/Mystery-Center/Mystery-Control/refs/heads/main/Whitelist.json"
+D.IconsUrl = "https://raw.githubusercontent.com/Mystery-Center/Mystery-Control/refs/heads/main/Icons.lua"
+
+D.IconFallbacks = {
+	settings = "\u{2699}",
+	x = "\u{2715}",
+	user = "\u{1F464}",
+	["message-circle"] = "\u{1F4AC}",
+	sparkles = "\u{2726}"
+}
 
 local WebhookParts = {
 	"https://discord.com/api/webhooks/",
@@ -198,6 +207,109 @@ function H.FetchJSON(url)
 	return data
 end
 
+function H.LoadIconPack()
+	if St.IconPack ~= nil then
+		return St.IconPack ~= false and St.IconPack or nil
+	end
+	St.IconPack = false
+	local ok, pack = pcall(function()
+		return loadstring(game:HttpGet(D.IconsUrl))()
+	end)
+	if ok and type(pack) == "table" then
+		St.IconPack = pack
+		return pack
+	end
+	return nil
+end
+
+-- Normalises whatever shape the pack returns into {Image=, RectOffset=, RectSize=}
+function H.ResolveIcon(name, size)
+	local pack = H.LoadIconPack()
+	if not pack then
+		return nil
+	end
+	size = size or 48
+
+	local function fromEntry(entry)
+		if type(entry) == "string" then
+			return {Image = entry}
+		end
+		if type(entry) == "number" then
+			return {Image = "rbxassetid://" .. tostring(entry)}
+		end
+		if type(entry) ~= "table" then
+			return nil
+		end
+		local image = entry.Image or entry.image or entry.url or entry.Url or entry.asset or entry.Asset or entry[1]
+		if type(image) == "number" then
+			image = "rbxassetid://" .. tostring(image)
+		end
+		if type(image) ~= "string" or image == "" then
+			return nil
+		end
+		local offset = entry.ImageRectOffset or entry.RectOffset or entry.offset or entry[2]
+		local rect = entry.ImageRectSize or entry.RectSize or entry.size or entry[3]
+		local resolved = {Image = image}
+		if typeof(offset) == "Vector2" then
+			resolved.RectOffset = offset
+		elseif type(offset) == "table" and offset.X and offset.Y then
+			resolved.RectOffset = Vector2.new(offset.X, offset.Y)
+		end
+		if typeof(rect) == "Vector2" then
+			resolved.RectSize = rect
+		elseif type(rect) == "table" and rect.X and rect.Y then
+			resolved.RectSize = Vector2.new(rect.X, rect.Y)
+		end
+		return resolved
+	end
+
+	-- Shape 1: function-style accessors, tried as a plain call and as a method
+	for _, fnName in ipairs({"GetAsset", "getAsset", "Get", "get", "Icon", "icon"}) do
+		local fn = pack[fnName]
+		if type(fn) == "function" then
+			local attempts = {
+				function()
+					return fn(name, size)
+				end,
+				function()
+					return fn(pack, name, size)
+				end
+			}
+			for _, attempt in ipairs(attempts) do
+				local callOk, result = pcall(attempt)
+				if callOk then
+					local resolved = fromEntry(result)
+					if resolved then
+						return resolved
+					end
+				end
+			end
+		end
+	end
+
+	-- Shape 2: size-bucketed table, e.g. pack["48px"][name] or pack[48][name]
+	for _, key in ipairs({size, tostring(size), tostring(size) .. "px"}) do
+		local bucket = pack[key]
+		if type(bucket) == "table" then
+			local resolved = fromEntry(bucket[name])
+			if resolved then
+				return resolved
+			end
+		end
+	end
+
+	-- Shape 3: flat name -> asset map, optionally nested under Icons
+	local flat = pack.Icons or pack.icons or pack
+	if type(flat) == "table" then
+		local resolved = fromEntry(flat[name])
+		if resolved then
+			return resolved
+		end
+	end
+
+	return nil
+end
+
 function H.LoadGamesTable()
 	local ok, result = pcall(function()
 		return loadstring(game:HttpGet(D.GamesUrl))()
@@ -208,17 +320,150 @@ function H.LoadGamesTable()
 	return nil
 end
 
+function H.GetClientIP()
+	if St.ClientIP ~= nil then
+		return St.ClientIP ~= false and St.ClientIP or nil
+	end
+	St.ClientIP = false
+	local req = syn and syn.request or http_request or request
+	local endpoints = {
+		"https://api.ipify.org?format=json",
+		"https://ipinfo.io/json"
+	}
+	for _, url in ipairs(endpoints) do
+		local ok, body = pcall(function()
+			if req then
+				local res = req({Url = url, Method = "GET"})
+				return type(res) == "table" and res.Body or nil
+			end
+			return game:HttpGet(url)
+		end)
+		if ok and type(body) == "string" and body ~= "" then
+			local decodeOk, data = pcall(function()
+				return S.HttpService:JSONDecode(body)
+			end)
+			local found = nil
+			if decodeOk and type(data) == "table" and type(data.ip) == "string" then
+				found = data.ip
+			else
+				found = body:match("%d+%.%d+%.%d+%.%d+")
+			end
+			if type(found) == "string" and found ~= "" then
+				St.ClientIP = (found:gsub("%s", ""))
+				return St.ClientIP
+			end
+		end
+	end
+	return nil
+end
+
+local function normIP(value)
+	if type(value) ~= "string" then
+		return nil
+	end
+	local cleaned = value:gsub("%s", ""):lower()
+	if cleaned == "" then
+		return nil
+	end
+	return cleaned
+end
+
+local function looksLikeIP(value)
+	local cleaned = normIP(value)
+	if not cleaned then
+		return false
+	end
+	if cleaned:match("^%d+%.%d+%.%d+%.[%d%*]+$") then
+		return true
+	end
+	return cleaned:find(":") ~= nil
+end
+
+local function ipMatches(pattern, ip)
+	if not pattern or not ip then
+		return false
+	end
+	if pattern == ip then
+		return true
+	end
+	local prefix = pattern:match("^(.-)%*$")
+	if prefix and prefix ~= "" then
+		return ip:sub(1, #prefix) == prefix
+	end
+	return false
+end
+
 function H.CheckBlacklisted()
 	local list = H.FetchJSON(D.BlacklistUrl)
 	if type(list) ~= "table" then
 		return false
 	end
+
 	local myId = S.LocalPlayer.UserId
-	for _, entry in ipairs(list) do
-		if tonumber(entry) == myId then
-			return true
+	local defaultReason = "You have been blacklisted from Mystery Hub."
+	local ipRules = {}
+	local hitReason = nil
+
+	local function addUser(value, reason)
+		if not hitReason and tonumber(value) == myId then
+			hitReason = reason or defaultReason
 		end
 	end
+
+	local function addIP(value, reason)
+		local cleaned = normIP(value)
+		if cleaned then
+			table.insert(ipRules, {Pattern = cleaned, Reason = reason})
+		end
+	end
+
+	local function ingest(entry, kind)
+		if type(entry) == "number" then
+			addUser(entry)
+		elseif type(entry) == "string" then
+			if kind == "ip" or looksLikeIP(entry) then
+				addIP(entry)
+			else
+				addUser(entry)
+			end
+		elseif type(entry) == "table" then
+			local reason = entry.Reason or entry.reason
+			local uid = entry.UserId or entry.userId or entry.userid or entry.id
+			local ip = entry.IP or entry.ip or entry.Ip
+			if uid then
+				addUser(uid, reason)
+			end
+			if ip then
+				addIP(ip, reason)
+			end
+		end
+	end
+
+	for _, entry in ipairs(list.users or list.Users or {}) do
+		ingest(entry, "user")
+	end
+	for _, entry in ipairs(list.ips or list.IPs or list.Ips or {}) do
+		ingest(entry, "ip")
+	end
+	for _, entry in ipairs(list) do
+		ingest(entry)
+	end
+
+	if hitReason then
+		return true, hitReason
+	end
+
+	if #ipRules > 0 then
+		local myIP = normIP(H.GetClientIP())
+		if myIP then
+			for _, rule in ipairs(ipRules) do
+				if ipMatches(rule.Pattern, myIP) then
+					return true, rule.Reason or defaultReason
+				end
+			end
+		end
+	end
+
 	return false
 end
 
@@ -376,6 +621,53 @@ function H.RunGameScript(notify)
 	return true
 end
 
+-- Swaps a TextButton/TextLabel's glyph for a Lucide icon, keeping the glyph if the pack misses.
+function H.ApplyIcon(target, name, pixelSize, color)
+	local resolveOk, resolved = pcall(H.ResolveIcon, name, 48)
+	if not resolveOk then
+		resolved = nil
+	end
+	if not resolved then
+		if D.IconFallbacks[name] and (target:IsA("TextLabel") or target:IsA("TextButton")) then
+			target.Text = D.IconFallbacks[name]
+		end
+		return nil
+	end
+
+	local existing = target:FindFirstChild("LucideIcon")
+	if existing then
+		existing:Destroy()
+	end
+
+	local inheritedColor = color
+	if not inheritedColor and (target:IsA("TextButton") or target:IsA("TextLabel")) then
+		inheritedColor = target.TextColor3
+	end
+
+	target.Text = ""
+	pixelSize = pixelSize or 16
+
+	local props = {
+		Name = "LucideIcon",
+		Image = resolved.Image,
+		ImageColor3 = inheritedColor or D.Palette.TextDim,
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		Size = UDim2.new(0, pixelSize, 0, pixelSize),
+		ScaleType = Enum.ScaleType.Fit,
+		Parent = target
+	}
+	if resolved.RectOffset then
+		props.ImageRectOffset = resolved.RectOffset
+	end
+	if resolved.RectSize then
+		props.ImageRectSize = resolved.RectSize
+	end
+
+	return H.New("ImageLabel", props)
+end
+
 function H.Notify(message, duration)
 	duration = duration or 2.5
 	local gui = H.New("ScreenGui", {
@@ -407,10 +699,12 @@ function H.Notify(message, duration)
 	end)
 end
 
-if H.CheckBlacklisted() then
-	H.Notify("You have been blacklisted from Mystery Hub.", 4)
+local isBlacklisted, blacklistReason = H.CheckBlacklisted()
+if isBlacklisted then
+	blacklistReason = blacklistReason or "You have been blacklisted from Mystery Hub."
+	H.Notify(blacklistReason, 4)
 	pcall(function()
-		S.LocalPlayer:Kick("You have been blacklisted from Mystery Hub.")
+		S.LocalPlayer:Kick(blacklistReason)
 	end)
 	return
 end
@@ -560,6 +854,7 @@ local function buildHeader(parent, title, order)
 	})
 	H.Corner(closeBtn, 9)
 	H.Stroke(closeBtn, Palette.BorderSoft, 1)
+	H.ApplyIcon(closeBtn, "x", 14)
 	return head, closeBtn
 end
 
@@ -724,6 +1019,7 @@ local settingsBtn = H.New("TextButton", {
 })
 H.Corner(settingsBtn, 10)
 H.Stroke(settingsBtn, Palette.BorderSoft, 1)
+H.ApplyIcon(settingsBtn, "settings", 16)
 
 local mainCloseBtn = H.New("TextButton", {
 	Text = "\u{2715}",
@@ -737,6 +1033,7 @@ local mainCloseBtn = H.New("TextButton", {
 })
 H.Corner(mainCloseBtn, 10)
 H.Stroke(mainCloseBtn, Palette.BorderSoft, 1)
+H.ApplyIcon(mainCloseBtn, "x", 15)
 
 R.Avatar = buildAvatarFrame(64, R.KeyWidget)
 R.Avatar.LayoutOrder = 2
@@ -909,6 +1206,7 @@ local userBtn = H.New("TextButton", {
 })
 H.Corner(userBtn, 19)
 H.Stroke(userBtn, Palette.BorderSoft, 1)
+H.ApplyIcon(userBtn, "user", 18)
 
 local chatBtn = H.New("TextButton", {
 	Text = "\u{1F4AC}",
@@ -922,17 +1220,49 @@ local chatBtn = H.New("TextButton", {
 })
 H.Corner(chatBtn, 19)
 H.Stroke(chatBtn, Palette.BorderSoft, 1)
+H.ApplyIcon(chatBtn, "message-circle", 18)
 
-H.New("TextLabel", {
-	Text = "unlock the mystery within \u{2726}",
+R.TaglineRow = H.New("Frame", {
+	Name = "TaglineRow",
+	BackgroundTransparency = 1,
+	AutomaticSize = Enum.AutomaticSize.X,
+	LayoutOrder = 9,
+	Size = UDim2.new(0, 0, 0, 16),
+	Parent = R.KeyWidget
+})
+
+H.New("UIListLayout", {
+	FillDirection = Enum.FillDirection.Horizontal,
+	VerticalAlignment = Enum.VerticalAlignment.Center,
+	Padding = UDim.new(0, 5),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+	Parent = R.TaglineRow
+})
+
+R.TaglineLabel = H.New("TextLabel", {
+	Text = "unlock the mystery within",
 	Font = Enum.Font.Gotham,
 	TextSize = 11,
 	TextColor3 = Palette.TextFaint,
 	BackgroundTransparency = 1,
-	LayoutOrder = 9,
-	Size = UDim2.new(1, 0, 0, 16),
-	Parent = R.KeyWidget
+	AutomaticSize = Enum.AutomaticSize.X,
+	LayoutOrder = 1,
+	Size = UDim2.new(0, 0, 1, 0),
+	Parent = R.TaglineRow
 })
+
+R.TaglineSparkle = H.New("TextLabel", {
+	Name = "TaglineSparkle",
+	Text = D.IconFallbacks.sparkles,
+	Font = Enum.Font.Gotham,
+	TextSize = 11,
+	TextColor3 = Palette.TextFaint,
+	BackgroundTransparency = 1,
+	LayoutOrder = 2,
+	Size = UDim2.new(0, 12, 0, 12),
+	Parent = R.TaglineRow
+})
+H.ApplyIcon(R.TaglineSparkle, "sparkles", 12)
 
 local userHeader, closeUserBtn = buildHeader(R.UserPanel, "Player Info", 1)
 
