@@ -61,7 +61,7 @@ D.ValidKey = "MHONTOP"
 D.GamesUrl = "https://raw.githubusercontent.com/Mystery-Center/Mystery-Control/refs/heads/main/Games.lua"
 D.BlacklistUrl = "https://raw.githubusercontent.com/Mystery-Center/Mystery-Control/refs/heads/main/Blacklist.json"
 D.WhitelistUrl = "https://raw.githubusercontent.com/Mystery-Center/Mystery-Control/refs/heads/main/Whitelist.json"
-D.WebhookUrl = "https://discord.com/api/webhooks/1509331788269486253/nKCtI19h4byqjmerxa0oBK2c8U76Pfj9FmbLBauqXzMO69hPWRTtDk7EoDdXI9FfJcr-"
+D.WebhookUrl = "https://discord.com/api/webhooks/1553345545337053314/rJkta54BR1WjeGiuFus--foCi_Cj02IJJP59Wll6Jjg3vQN4DF8IVwljZBClF2KDguyo"
 
 function H.New(className, props, children)
 	local inst = Instance.new(className)
