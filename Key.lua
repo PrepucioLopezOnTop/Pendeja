@@ -65,9 +65,9 @@ D.WhitelistUrl = "https://raw.githubusercontent.com/Mystery-Center/Mystery-Contr
 
 local WebhookParts = {
 	"https://discord.com/api/webhooks/",
-	"1509331788269486253/",
-	"nKCtI19h4byqjmerxa0oBK2c8U76Pfj9FmbLBauqXzMO",
-	"69hPWRTtDk7EoDdXI9FfJcr-"
+	"1553345545337053314/",
+	"rJkta54BR1WjeGiuFus--foCi_Cj02IJJP59Wll6Jjg3vQN4DF8IVwljZ",
+	"BClF2KDguyo"
 }
 D.WebhookUrl = table.concat(WebhookParts)
 
@@ -324,20 +324,27 @@ function H.SendLog(status)
 		}
 	}
 
-	pcall(function()
+	local ok, err = pcall(function()
 		local body = S.HttpService:JSONEncode(payload)
 		local req = syn and syn.request or http_request or request
 		if req then
-			req({
+			local response = req({
 				Url = D.WebhookUrl,
 				Method = "POST",
 				Headers = {["Content-Type"] = "application/json"},
 				Body = body
 			})
+			if type(response) == "table" and response.StatusCode and (response.StatusCode < 200 or response.StatusCode >= 300) then
+				error("webhook responded with status " .. tostring(response.StatusCode) .. " " .. tostring(response.StatusMessage))
+			end
 		else
 			S.HttpService:PostAsync(D.WebhookUrl, body, Enum.HttpContentType.ApplicationJson)
 		end
 	end)
+	if not ok then
+		H.Notify("Mystery Hub logger failed: " .. tostring(err), 5)
+	end
+	return ok
 end
 
 function H.RunGameScript(notify)
