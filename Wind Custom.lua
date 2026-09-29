@@ -177,13 +177,10 @@ local VersionTag = Window:Tag({
     Border = false,
 })
 
-local GradientTag = Window:Tag({
-    Title = "Gradient tag",
+local SecondTag = Window:Tag({
+    Title = "Second tag",
     Icon = "sparkles",
-    Color = WindUI:Gradient({
-        ["0"] = { Color = Color3.fromHex("#ff0080"), Transparency = 0 },
-        ["100"] = { Color = Color3.fromHex("#7928ca"), Transparency = 0 },
-    }, { Rotation = 45 }),
+    Color = Color3.fromHex("#ff0080"),
     Radius = 13,
 })
 
