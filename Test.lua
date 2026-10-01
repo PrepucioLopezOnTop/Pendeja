@@ -18,7 +18,7 @@ end
 local Config = {
     HubName = "Mystery Hub",
     Key = "MHONTOP",
-    DiscordLink = "https://discord.gg/CHANGE_ME",
+    DiscordLink = "https://discord.gg/yXgJzeRCn",
     WhitelistUrl = "https://raw.githubusercontent.com/Mystery-Center/Mystery-Control/refs/heads/main/Whitelist.json",
     BlacklistUrl = "https://raw.githubusercontent.com/Mystery-Center/Mystery-Control/refs/heads/main/Blacklist.json",
     WindUiUrl = "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua",
