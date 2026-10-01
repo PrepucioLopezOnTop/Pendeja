@@ -111,7 +111,7 @@ local windowConfig = {
     ScrollBarEnabled = false,
     User = {
         Enabled = true,
-        Anonymous = true,
+        Anonymous = false,
     },
 }
 
@@ -129,7 +129,7 @@ Window:Tag({
     Title = "v1.1.1",
     Icon = "github",
     Color = Color3.fromHex("#7c3aed"),
-    Radius = 0,
+    Radius = 12,
 })
 
 Window:EditOpenButton({
@@ -174,5 +174,248 @@ local Packs = Farming:Tab({
     Locked = false,
 })
 
+local Miscellaneous = Window:Section({
+    Title = "Miscellaneous",
+    Opened = true,
+})
+
+local Extras = Miscellaneous:Tab({
+    Title = "Extras",
+    Icon = "folders",
+    Locked = false,
+})
+
+local Snacks = Miscellaneous:Tab({
+    Title = "Snacks",
+    Icon = "popcorn",
+    Locked = false,
+})
+
+local Calculator = Miscellaneous:Tab({
+    Title = "Data",
+    Icon = "calculator",
+    Locked = false,
+})
+
+local Player = Window:Section({
+    Title = "Player",
+    Opened = true,
+})
+
+local Stats = Player:Tab({
+    Title = "Stats",
+    Icon = "users",
+    Locked = false,
+})
+
+local Killer = Player:Tab({
+    Title = "Killer",
+    Icon = "skull",
+    Locked = false,
+})
+
+local Teleport = Player:Tab({
+    Title = "Teleport",
+    Icon = "map-pin",
+    Locked = false,
+})
+
+local Library = Window:Section({
+    Title = "Library",
+    Opened = true,
+})
+
+local Settings = Library:Tab({
+    Title = "Settings",
+    Icon = "settings",
+    Locked = false,
+})
+
+local ConfigManager = Window.ConfigManager
+local configCache = {}
+local currentConfigName = "default"
+local newConfigName = ""
+local autoSaveEnabled = false
+
+local function sanitizeName(name)
+    local clean = tostring(name or ""):gsub("[^%w_%- ]", "")
+    clean = clean:gsub("^%s+", ""):gsub("%s+$", "")
+    return clean
+end
+
+local function getConfigNames()
+    local ok, names = pcall(function()
+        return ConfigManager:AllConfigs()
+    end)
+    if ok and type(names) == "table" and #names > 0 then
+        return names
+    end
+    return { "default" }
+end
+
+local themeNames = {}
+for name in pairs(WindUI:GetThemes()) do
+    table.insert(themeNames, name)
+end
+table.sort(themeNames)
+
+Settings:Section({
+    Title = "Appearance",
+})
+
+local ThemeDropdown = Settings:Dropdown({
+    Title = "Theme",
+    Desc = "Change the UI colors",
+    Values = themeNames,
+    Value = "Sherya",
+    Callback = function(option)
+        WindUI:SetTheme(option)
+    end,
+})
+
+local TransparencyToggle = Settings:Toggle({
+    Title = "Transparency",
+    Desc = "Make the window transparent",
+    Value = true,
+    Callback = function(state)
+        Window:ToggleTransparency(state)
+    end,
+})
+
+Settings:Section({
+    Title = "Configuration",
+})
+
+local AutoSaveToggle = Settings:Toggle({
+    Title = "Auto Save",
+    Desc = "Saves the current config every 5 seconds",
+    Value = false,
+    Callback = function(state)
+        autoSaveEnabled = state
+    end,
+})
+
+local function getConfig(name)
+    if configCache[name] then
+        return configCache[name]
+    end
+    local config = ConfigManager:CreateConfig(name)
+    config:Register("theme", ThemeDropdown)
+    config:Register("transparency", TransparencyToggle)
+    config:Register("autosave", AutoSaveToggle)
+    configCache[name] = config
+    return config
+end
+
+local ConfigDropdown = Settings:Dropdown({
+    Title = "Select config",
+    Values = getConfigNames(),
+    Value = currentConfigName,
+    Callback = function(option)
+        currentConfigName = option
+    end,
+})
+
+Settings:Input({
+    Title = "New config name",
+    Placeholder = "My config",
+    Value = "",
+    Callback = function(text)
+        newConfigName = text
+    end,
+})
+
+Settings:Button({
+    Title = "Create config",
+    Desc = "Creates and saves a new config with the typed name",
+    Callback = function()
+        local name = sanitizeName(newConfigName)
+        if name == "" then
+            WindUI:Notify({
+                Title = "Config",
+                Content = "Type a valid name first.",
+                Duration = 3,
+                Icon = "triangle-alert",
+            })
+            return
+        end
+        currentConfigName = name
+        pcall(function()
+            getConfig(name):Save()
+        end)
+        ConfigDropdown:Refresh(getConfigNames())
+        ConfigDropdown:Select(name)
+        WindUI:Notify({
+            Title = "Config",
+            Content = "Created: " .. name,
+            Duration = 3,
+            Icon = "check",
+        })
+    end,
+})
+
+Settings:Button({
+    Title = "Save config",
+    Callback = function()
+        local ok = pcall(function()
+            getConfig(currentConfigName):Save()
+        end)
+        WindUI:Notify({
+            Title = "Config",
+            Content = ok and ("Saved: " .. currentConfigName) or "Could not save.",
+            Duration = 3,
+            Icon = ok and "check" or "triangle-alert",
+        })
+    end,
+})
+
+Settings:Button({
+    Title = "Load config",
+    Callback = function()
+        local ok = pcall(function()
+            getConfig(currentConfigName):Load()
+        end)
+        WindUI:Notify({
+            Title = "Config",
+            Content = ok and ("Loaded: " .. currentConfigName) or "Could not load.",
+            Duration = 3,
+            Icon = ok and "check" or "triangle-alert",
+        })
+    end,
+})
+
+Settings:Button({
+    Title = "Delete config",
+    Callback = function()
+        local name = currentConfigName
+        pcall(function()
+            getConfig(name):Delete()
+        end)
+        configCache[name] = nil
+        currentConfigName = "default"
+        ConfigDropdown:Refresh(getConfigNames())
+        ConfigDropdown:Select("default")
+        WindUI:Notify({
+            Title = "Config",
+            Content = "Deleted: " .. name,
+            Duration = 3,
+            Icon = "trash-2",
+        })
+    end,
+})
+
+task.spawn(function()
+    while task.wait(5) do
+        if autoSaveEnabled then
+            pcall(function()
+                getConfig(currentConfigName):Save()
+            end)
+        end
+    end
+end)
+
+pcall(function()
+    getConfig(currentConfigName):Load()
+end)
 
 Home:Select()
